@@ -156,6 +156,86 @@ select {
   padding: 10px 12px;
 }
 
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.settings-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+.mode-description {
+  border-left: 3px solid var(--accent);
+  padding: 10px 12px;
+  background: #10161f;
+}
+
+.emergency-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: #10161f;
+}
+
+.emergency-card.active {
+  border-color: var(--danger);
+  background: rgba(255, 107, 122, 0.08);
+}
+
+.permission-list {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.permission-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.permission-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.replay-scroll {
+  overflow-x: auto;
+  margin-top: 16px;
+}
+
+.replay-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.replay-table th,
+.replay-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  vertical-align: top;
+}
+
+.replay-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.replay-table td {
+  word-break: break-word;
+}
+
 @media (max-width: 900px) {
   .hero,
   .grid,

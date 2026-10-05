@@ -1,6 +1,13 @@
 import type { ChannelSettings, ChatMessage, Classification, ViolationCategory } from "./types";
 
 const HATE_TERMS = ["nazi", "gas the", "kill all", "racial slur"];
+const HATE_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bjews?\b/i, label: "antisemitic slur" },
+  { pattern: /\bkikes?\b/i, label: "antisemitic slur" },
+  { pattern: /\b(?:dirty|filthy|fucking|stupid)\s+jewish\b/i, label: "antisemitic slur" },
+  { pattern: /\bniggers?\b/i, label: "racial slur" },
+  { pattern: /\bfaggots?\b/i, label: "homophobic slur" },
+];
 const HARASSMENT_TERMS = ["kys", "kill yourself", "dox", "swat you", "i will find you"];
 const SEXUAL_TERMS = ["send nudes", "onlyfans leak", "child porn"];
 const RAID_TERMS = ["follow for follow raid", "hate raid incoming"];
@@ -10,14 +17,17 @@ const SPAM_PATTERNS = [
   /(\b\w+\b)(?:\s+\1){4,}/i,
 ];
 
-const MODEL_VERSION = "heuristic-v1";
+const MODEL_VERSION = "heuristic-v2";
 
 function includesAny(text: string, terms: string[]): string[] {
   return terms.filter((term) => text.includes(term));
 }
 
 function detectCategory(normalized: string): { category: ViolationCategory; matchedTerms: string[] } {
-  const hateHits = includesAny(normalized, HATE_TERMS);
+  const hateHits = [
+    ...includesAny(normalized, HATE_TERMS),
+    ...HATE_PATTERNS.filter((entry) => entry.pattern.test(normalized)).map((entry) => entry.label),
+  ];
   if (hateHits.length > 0) {
     return { category: "hate", matchedTerms: hateHits };
   }
@@ -51,30 +61,36 @@ function detectCategory(normalized: string): { category: ViolationCategory; matc
 
 export function classifyMessage(message: ChatMessage, settings: ChannelSettings): Classification {
   const normalized = message.text.toLowerCase().trim();
-  const allowedHit = settings.allowedTerms.find((term) => normalized.includes(term.toLowerCase()));
-
-  if (allowedHit) {
-    return {
-      category: "none",
-      risk: "none",
-      confidence: 0.92,
-      reason: `Allowed community term "${allowedHit}" was treated as in-context chat.`,
-      matchedTerms: [allowedHit],
-    };
-  }
-
-  const blockedHit = settings.blockedTerms.find((term) => normalized.includes(term.toLowerCase()));
-  if (blockedHit) {
-    return {
-      category: "spam",
-      risk: "medium",
-      confidence: 0.97,
-      reason: `Matched a channel blocked term: ${blockedHit}.`,
-      matchedTerms: [blockedHit],
-    };
-  }
-
   const detected = detectCategory(normalized);
+  const severe =
+    detected.category === "hate" ||
+    detected.category === "harassment" ||
+    detected.category === "sexual" ||
+    detected.category === "raid";
+
+  if (!severe) {
+    const allowedHit = settings.allowedTerms.find((term) => normalized.includes(term.toLowerCase()));
+    if (allowedHit) {
+      return {
+        category: "none",
+        risk: "none",
+        confidence: 0.92,
+        reason: `Allowed community term "${allowedHit}" was treated as in-context chat.`,
+        matchedTerms: [allowedHit],
+      };
+    }
+
+    const blockedHit = settings.blockedTerms.find((term) => normalized.includes(term.toLowerCase()));
+    if (blockedHit) {
+      return {
+        category: "spam",
+        risk: "medium",
+        confidence: 0.97,
+        reason: `Matched a channel blocked term: ${blockedHit}.`,
+        matchedTerms: [blockedHit],
+      };
+    }
+  }
 
   if (detected.category === "hate" || detected.category === "sexual") {
     return {

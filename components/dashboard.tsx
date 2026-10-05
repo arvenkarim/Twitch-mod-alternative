@@ -1,7 +1,27 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { ReplayCaseResult, ReplayReport } from "@/lib/replay";
 import type { ChannelRole, DashboardSnapshot } from "@/lib/types";
+
+const groupLabel: Record<ReplayCaseResult["group"], string> = {
+  slang: "Slang",
+  greeting: "Small talk",
+  spam: "Spam",
+  toxicity: "Insult",
+  harassment: "Harassment",
+  hate: "Hate",
+  raid: "Raid",
+  sexual: "Sexual",
+  protected: "Protected role",
+  command: "Command",
+  prompt_injection: "Prompt injection",
+  quote: "Quote",
+  sarcasm: "Sarcasm",
+  allowlist_bypass: "Allowlist",
+  multilingual: "Multilingual",
+  title: "Title",
+};
 
 const actionTone: Record<string, string> = {
   ignore: "ok",
@@ -12,6 +32,12 @@ const actionTone: Record<string, string> = {
   ban: "danger",
 };
 
+const moderationLevelLabel = {
+  relaxed: "Relaxed",
+  balanced: "Balanced",
+  strict: "Strict",
+} as const;
+
 export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [username, setUsername] = useState("demo_viewer");
@@ -20,9 +46,10 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(
     initialSnapshot.settings.operatingMode === "live"
-      ? "Live Mode aktiv. Löschen, Timeouts und Bans werden als ausgeführt markiert."
-      : "Shadow Mode ist aktiv. Die KI bewertet, greift aber noch nicht in den Live-Chat ein.",
+      ? "Live mode is on. Deletes, timeouts, and bans are marked as executed."
+      : "Shadow mode is on. The AI scores chat, but does not act in the live chat yet.",
   );
+  const [replay, setReplay] = useState<ReplayReport | null>(null);
 
   const liveLabel = snapshot.settings.operatingMode === "live" ? "Live" : "Shadow";
 
@@ -37,6 +64,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
     }),
     [snapshot],
   );
+  const timeouts = snapshot.audit.filter((item) => item.action === "timeout");
 
   async function refresh() {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
@@ -60,15 +88,42 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
     }
   }
 
+  async function updateSetting(body: Record<string, unknown>) {
+    await run("/api/settings", body);
+    setNotice("Moderation settings saved.");
+  }
+
+  async function playReplay() {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/replay", { method: "POST" });
+      const body = (await response.json()) as ReplayReport | { error?: string };
+      if (!response.ok || !("cases" in body)) {
+        throw new Error("request failed");
+      }
+      setReplay(body);
+      setNotice(
+        body.lockedFailed > 0
+          ? `Replay bench: ${body.lockedFailed} locked cases drifted. ${body.watchMissed} known gaps.`
+          : `Replay bench: ${body.lockedPassed} locked cases passed. ${body.watchMissed} known gaps remain.`,
+      );
+    } catch {
+      setReplay(null);
+      setNotice("The replay bench could not run the corpus.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="layout">
       <section className="hero">
         <div>
           <p className="chip">Nachtschicht</p>
-          <h1>KI-Moderator für Twitch-Chat</h1>
+          <h1>AI moderator for Twitch chat</h1>
           <p className="muted">
-            Die KI handelt im Chat wie ein echter Mod: löschen, timeouten und bei schweren Verstößen bannen.
-            Titel, Kategorie und Tags erscheinen erst nach deiner Freigabe.
+            The AI acts in chat like a real moderator: delete, timeout, and ban severe violations.
+            Title, category, and tags stay proposals until you approve them.
           </p>
         </div>
         <div className="actions">
@@ -82,8 +137,8 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
               });
               setNotice(
                 snapshot.settings.operatingMode === "live"
-                  ? "Zurück im Shadow Mode. Aktionen werden nur protokolliert."
-                  : "Live Mode aktiv. Löschen, Timeouts und Bans werden als ausgeführt markiert.",
+                  ? "Back in shadow mode. Actions are logged only."
+                  : "Live mode is on. Deletes, timeouts, and bans are marked as executed.",
               );
             }}
           >
@@ -93,23 +148,229 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             disabled={busy}
             onClick={async () => {
               await run("/api/demo");
-              setNotice("Demo-Chat wurde bewertet: Spam, Toxizität, Hate, geschützter Mod und Titelvorschlag.");
+              setNotice("Demo chat scored: spam, toxicity, hate, a protected moderator, and a title proposal.");
             }}
           >
-            Demo-Chat starten
+            Run demo chat
           </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="meta">
+          <h2>Replay bench</h2>
+          <button type="button" disabled={busy} onClick={() => void playReplay()}>
+            Run corpus
+          </button>
+        </div>
+        <p className="muted">
+          The corpus runs in its own database in shadow mode. Every decision is logged.
+          Twitch is not contacted, and the stream title stays a proposal.
+        </p>
+        {replay ? (
+          <>
+            <div className="actions">
+              <span className="chip ok">Locked {replay.lockedPassed}</span>
+              <span className={`chip ${replay.lockedFailed > 0 ? "danger" : ""}`}>Drift {replay.lockedFailed}</span>
+              <span className="chip warn">Gaps {replay.watchMissed}</span>
+              <span className="chip">Shadow</span>
+            </div>
+            <div className="replay-scroll">
+              <table className="replay-table">
+                <thead>
+                  <tr>
+                    <th>Message</th>
+                    <th>Group</th>
+                    <th>Action</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replay.cases.map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <strong>{item.username}</strong>
+                        <div>{item.text}</div>
+                      </td>
+                      <td>{groupLabel[item.group]}</td>
+                      <td>
+                        {item.category} · {item.action}
+                      </td>
+                      <td>
+                        <span className={`chip ${replayTone(item)}`}>{replayLabel(item)}</span>
+                        {item.matches ? null : (
+                          <div className="muted">
+                            Expected: {item.expectedCategory} · {item.expectedAction}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="muted">No run yet. The dashboard log stays unchanged.</p>
+        )}
+      </section>
+
+      <section className="grid settings-grid">
+        <div className="panel">
+          <h2>Chat mode</h2>
+          <p className="muted">The level chooses the response. Your individual permissions set the hard ceiling.</p>
+          <label>
+            Moderation level
+            <select
+              value={snapshot.settings.moderationLevel}
+              disabled={busy}
+              onChange={(event) =>
+                void updateSetting({ moderationLevel: event.target.value })
+              }
+            >
+              <option value="relaxed">Relaxed — flag instead of punishing</option>
+              <option value="balanced">Balanced — default rules</option>
+              <option value="strict">Strict — delete and timeout earlier</option>
+            </select>
+          </label>
+          <p className="mode-description">
+            <strong>{moderationLevelLabel[snapshot.settings.moderationLevel]}</strong>
+            {" · "}
+            {snapshot.settings.moderationLevel === "relaxed"
+              ? "Spam is flagged, and severe violations are timed out at most."
+              : snapshot.settings.moderationLevel === "strict"
+                ? "Light violations are deleted, spam is timed out, and severe violations can be banned."
+                : "Spam is deleted, harassment is timed out, and severe violations can be banned."}
+          </p>
+          <label>
+            Maximum timeout in seconds
+            <input
+              type="number"
+              min={30}
+              max={1_209_600}
+              key={snapshot.settings.maxTimeoutSeconds}
+              defaultValue={snapshot.settings.maxTimeoutSeconds}
+              disabled={busy}
+              onBlur={(event) => {
+                const value = Number(event.target.value);
+                if (Number.isInteger(value) && value >= 30 && value <= 1_209_600) {
+                  void updateSetting({ maxTimeoutSeconds: value });
+                } else {
+                  event.target.value = String(snapshot.settings.maxTimeoutSeconds);
+                }
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="panel">
+          <h2>What the bot may do</h2>
+          <div className={`emergency-card ${snapshot.settings.emergencyStop ? "active" : ""}`}>
+            <div>
+              <strong>Emergency stop</strong>
+              <div className="muted">
+                {snapshot.settings.emergencyStop
+                  ? "On: every action is held and only logged."
+                  : "Off: permitted actions may execute in live mode."}
+              </div>
+            </div>
+            <button
+              type="button"
+              className={snapshot.settings.emergencyStop ? "secondary" : "danger"}
+              disabled={busy}
+              onClick={() =>
+                void updateSetting({ emergencyStop: !snapshot.settings.emergencyStop })
+              }
+            >
+              {snapshot.settings.emergencyStop ? "Release stop" : "Activate stop"}
+            </button>
+          </div>
+          <div className="permission-list">
+            <PermissionToggle
+              label="Delete messages"
+              checked={snapshot.settings.allowMessageDeletion}
+              disabled={busy}
+              onChange={(checked) => void updateSetting({ allowMessageDeletion: checked })}
+            />
+            <PermissionToggle
+              label="Timeout users"
+              checked={snapshot.settings.allowTimeouts}
+              disabled={busy}
+              onChange={(checked) => void updateSetting({ allowTimeouts: checked })}
+            />
+            <PermissionToggle
+              label="Ban users automatically"
+              checked={snapshot.settings.allowAutomaticBans}
+              disabled={busy}
+              onChange={(checked) => void updateSetting({ allowAutomaticBans: checked })}
+            />
+            <PermissionToggle
+              label="Set chat protection such as follower-only mode"
+              checked={snapshot.settings.allowChatModeChanges}
+              disabled={busy}
+              onChange={(checked) => void updateSetting({ allowChatModeChanges: checked })}
+            />
+            <PermissionToggle
+              label="Create title and category proposals"
+              checked={snapshot.settings.allowTitleProposals}
+              disabled={busy}
+              onChange={(checked) => void updateSetting({ allowTitleProposals: checked })}
+            />
+          </div>
+          <p className="muted">
+            Title changes stay proposals even when this is on. You still confirm publication yourself.
+          </p>
         </div>
       </section>
 
       <section className="grid">
         <div className="panel">
-          <h2>Chat bewerten</h2>
+          <h2>AI budget and context</h2>
+          <div className="actions">
+            <span className="chip">{snapshot.aiRuntime.modelVersion}</span>
+            <span className="chip ok">0 tokens used</span>
+          </div>
+          <p className="muted">
+            Nachtschicht currently uses a local heuristic, not an LLM. There is no token limit and no context
+            window yet. Once an LLM is enabled, used tokens, remaining budget, and context usage will show here.
+          </p>
+        </div>
+
+        <div className="panel">
+          <h2>Timeout log</h2>
+          {timeouts.length === 0 ? (
+            <p className="muted">No timeout decision yet.</p>
+          ) : (
+            <div className="list">
+              {timeouts.slice(0, 5).map((item) => (
+                <div className="card" key={`timeout-${item.id}`}>
+                  <div className="meta">
+                    <strong>{item.username}</strong>
+                    <span className="chip danger">
+                      {item.timeoutSeconds ?? 0}s · {item.executed ? "executed" : "held"}
+                    </span>
+                  </div>
+                  <p>{item.category} · confidence {Math.round(item.confidence * 100)}%</p>
+                  <p className="muted">{item.reason}</p>
+                  <small className="muted">
+                    {item.modelVersion} · {item.ruleVersion} · {new Date(item.createdAt).toLocaleString("en-US")}
+                  </small>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="grid">
+        <div className="panel">
+          <h2>Review chat</h2>
           <p className="muted">{notice}</p>
           <form
             onSubmit={async (event) => {
               event.preventDefault();
               await run("/api/chat", { userId: username, username, role, text });
-              setNotice(`Nachricht von ${username} bewertet.`);
+              setNotice(`Scored the message from ${username}.`);
             }}
           >
             <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" />
@@ -122,13 +383,13 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             </select>
             <textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} />
             <button disabled={busy} type="submit">
-              Nachricht prüfen
+              Score message
             </button>
           </form>
         </div>
 
         <div className="panel">
-          <h2>Stream-Schild</h2>
+          <h2>Stream shield</h2>
           <p>
             <strong>{snapshot.stream.title}</strong>
           </p>
@@ -136,15 +397,15 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             {snapshot.stream.category} · {snapshot.stream.tags.join(", ")}
           </p>
           <div className="actions">
-            <span className="chip">Nachrichten {stats.messages}</span>
-            <span className="chip warn">Markiert {stats.flags}</span>
-            <span className="chip danger">Ausgeführt {stats.actions}</span>
+            <span className="chip">Messages {stats.messages}</span>
+            <span className="chip warn">Flagged {stats.flags}</span>
+            <span className="chip danger">Executed {stats.actions}</span>
           </div>
           {pending ? (
             <div className="card" style={{ marginTop: 16 }}>
               <div className="meta">
-                <strong>Titelvorschlag</strong>
-                <span className="chip warn">Freigabe nötig</span>
+                <strong>Title proposal</strong>
+                <span className="chip warn">Approval required</span>
               </div>
               <p>
                 {pending.title} · {pending.category}
@@ -155,26 +416,26 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
                   disabled={busy}
                   onClick={async () => {
                     await run("/api/title", { status: "approved" });
-                    setNotice("Titeländerung veröffentlicht.");
+                    setNotice("Title change published.");
                   }}
                 >
-                  Freigeben
+                  Approve
                 </button>
                 <button
                   className="secondary"
                   disabled={busy}
                   onClick={async () => {
                     await run("/api/title", { status: "rejected" });
-                    setNotice("Titelvorschlag verworfen.");
+                    setNotice("Title proposal rejected.");
                   }}
                 >
-                  Ablehnen
+                  Reject
                 </button>
               </div>
             </div>
           ) : (
             <p className="muted" style={{ marginTop: 16 }}>
-              Kein offener Titelvorschlag.
+              No open title proposal.
             </p>
           )}
         </div>
@@ -182,10 +443,10 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
 
       <section className="grid">
         <div className="panel">
-          <h2>Letzte Nachrichten</h2>
+          <h2>Recent messages</h2>
           <div className="list">
             {snapshot.recentMessages.length === 0 ? (
-              <p className="muted">Noch kein Chat. Starte die Demo oder sende eine Testnachricht.</p>
+              <p className="muted">No chat yet. Run the demo or send a test message.</p>
             ) : (
               snapshot.recentMessages.map((item) => (
                 <div className="card" key={item.id}>
@@ -193,7 +454,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
                     <strong>
                       {item.username} · {item.role}
                     </strong>
-                    <span className="chip">{new Date(item.createdAt).toLocaleTimeString("de-DE")}</span>
+                    <span className="chip">{new Date(item.createdAt).toLocaleTimeString("en-US")}</span>
                   </div>
                   <p>{item.text}</p>
                 </div>
@@ -203,10 +464,10 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
         </div>
 
         <div className="panel">
-          <h2>Audit-Log</h2>
+          <h2>Audit log</h2>
           {lastAction ? (
             <p className="muted">
-              Letzte Entscheidung: {lastAction.action} für {lastAction.username}.
+              Latest decision: {lastAction.action} for {lastAction.username}.
             </p>
           ) : null}
           <div className="list">
@@ -217,16 +478,66 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
                     {item.username} · {item.action}
                   </strong>
                   <span className={`chip ${actionTone[item.action] ?? ""}`}>
-                    {item.executed ? "ausgeführt" : "nur bewertet"}
+                    {item.executed ? "executed" : "scored only"}
                   </span>
                 </div>
                 <p>{item.text}</p>
                 <p className="muted">{item.reason}</p>
+                <small className="muted">
+                  {item.category} · confidence {Math.round(item.confidence * 100)}%
+                  {item.timeoutSeconds ? ` · ${item.timeoutSeconds}s Timeout` : ""}
+                  {" · "}
+                  {item.modelVersion} · {item.ruleVersion}
+                </small>
               </div>
             ))}
           </div>
         </div>
       </section>
     </div>
+  );
+}
+
+function replayTone(item: ReplayCaseResult) {
+  if (item.matches) {
+    return "ok";
+  }
+  if (item.status === "watch") {
+    return "warn";
+  }
+  return "danger";
+}
+
+function replayLabel(item: ReplayCaseResult) {
+  if (item.matches) {
+    return "Pass";
+  }
+  if (item.status === "watch") {
+    return "Gap";
+  }
+  return "Drift";
+}
+
+function PermissionToggle({
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="permission-toggle">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>{label}</span>
+    </label>
   );
 }

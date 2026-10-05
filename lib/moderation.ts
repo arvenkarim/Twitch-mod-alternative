@@ -3,6 +3,7 @@ import {
   getPendingProposal,
   getSettings,
   getStreamMetadata,
+  getTwitchConnection,
   listAudit,
   listRecentMessages,
   resolvePendingProposal,
@@ -14,7 +15,7 @@ import {
 import { decidePolicy, RULE_VERSION } from "./policy";
 import { proposeStreamUpdate } from "./title-advisor";
 import { executeTwitchAction } from "./twitch";
-import type { ChannelSettings, ChatMessage, DashboardSnapshot } from "./types";
+import type { ChannelSettings, ChatMessage, Classification, DashboardSnapshot, PolicyDecision } from "./types";
 
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -22,7 +23,8 @@ function createId(prefix: string): string {
 
 export function ingestChatMessage(input: Omit<ChatMessage, "id" | "createdAt"> & { id?: string }): {
   message: ChatMessage;
-  decision: ReturnType<typeof decidePolicy>;
+  classification: Classification;
+  decision: PolicyDecision;
 } {
   const message: ChatMessage = {
     id: input.id ?? createId("msg"),
@@ -58,12 +60,14 @@ export function ingestChatMessage(input: Omit<ChatMessage, "id" | "createdAt"> &
     ruleVersion: RULE_VERSION,
   });
 
-  const proposal = proposeStreamUpdate(getStreamMetadata(), message.text);
+  const proposal = settings.allowTitleProposals
+    ? proposeStreamUpdate(getStreamMetadata(), message.text)
+    : null;
   if (proposal) {
     saveProposal(proposal);
   }
 
-  return { message, decision };
+  return { message, classification, decision };
 }
 
 export function getDashboard(): DashboardSnapshot {
@@ -73,11 +77,23 @@ export function getDashboard(): DashboardSnapshot {
     pendingProposal: getPendingProposal(),
     recentMessages: listRecentMessages(),
     audit: listAudit(),
+    connection: getTwitchConnection(),
+    aiRuntime: {
+      engine: "heuristic",
+      modelVersion: getModelVersion(),
+      contextWindowTokens: null,
+      tokensUsed: 0,
+      tokensRemaining: null,
+    },
   };
 }
 
 export function setOperatingMode(operatingMode: ChannelSettings["operatingMode"]) {
   return updateSettings({ operatingMode });
+}
+
+export function setChannelSettings(settings: Partial<ChannelSettings>) {
+  return updateSettings(settings);
 }
 
 export function decideTitleProposal(status: "approved" | "rejected") {

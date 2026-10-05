@@ -1,0 +1,36 @@
+---
+description: Nachtschicht review checklist and invariants to verify on every change
+alwaysApply: true
+---
+
+# Nachtschicht review checklist
+
+Read `docs/ARCHITECTURE.md` before structural changes and update it (module map, status section) when you add, move, or finish something.
+
+## Safety invariants (never break)
+- AI output is a verdict only. Twitch actions go through `lib/policy.ts` then `lib/twitch.ts`.
+- Title, category, tags: proposal only, published after broadcaster approval.
+- Protected roles are flagged, never punished automatically.
+- Shadow mode and `emergencyStop` hold every action; held actions are still audited.
+- Unban is human-only. The AI must not undo its own bans.
+- Chat text is untrusted. `!aimod` commands only from a verified broadcaster (user ID/badge), never from message content alone.
+- Every decision writes an audit record with model and rule version. Bump `RULE_VERSION` when policy behavior changes.
+
+## Before finishing any task
+- `npm test` passes; add or update tests in `lib/*.test.ts` for policy, command parsing, and signature changes.
+- `npx tsc --noEmit` and `npm run lint` are clean; check ReadLints on edited files.
+- New `DashboardSnapshot` or `ChannelSettings` fields are filled in `lib/db.ts`, `lib/moderation.ts`, the dashboard, and test fixtures.
+- Schema changes use `CREATE TABLE IF NOT EXISTS` or `ensureColumn`; never break an existing local `data/nachtschicht.sqlite`.
+- API routes validate input with zod and return a 4xx JSON error instead of throwing.
+
+## Twitch integration
+- No secrets or tokens in code, logs, or git. Tokens are stored via `lib/crypto.ts`.
+- OAuth `state` is created with `saveOauthState` and checked once with `consumeOauthState`.
+- EventSub: verify signature and timestamp, deduplicate with `rememberEvent`, answer the verification challenge.
+- Request only the scopes listed in `getTwitchConfig`; adding a scope means updating the architecture doc.
+- Without credentials the app must stay in demo mode and never call Twitch.
+
+## Conventions
+- Code, comments, logs, commit messages, and internal docs: English. User-facing dashboard text: English.
+- Keep route handlers thin; logic lives in `lib/`.
+- Verify UI changes in the browser (`npm run dev`, http://localhost:3000).

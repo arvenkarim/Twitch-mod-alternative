@@ -1,6 +1,6 @@
 import type { ChannelSettings, ChatAction, Classification, PolicyDecision, ChatMessage } from "./types";
 
-export const RULE_VERSION = "policy-v2";
+export const RULE_VERSION = "policy-v3";
 
 const ACTION_BY_RISK: Record<Classification["risk"], ChatAction> = {
   none: "ignore",
@@ -8,6 +8,27 @@ const ACTION_BY_RISK: Record<Classification["risk"], ChatAction> = {
   medium: "delete",
   high: "timeout",
   severe: "ban",
+};
+
+const ACTION_BY_LEVEL: Record<
+  ChannelSettings["moderationLevel"],
+  Record<Classification["risk"], ChatAction>
+> = {
+  relaxed: {
+    none: "ignore",
+    low: "ignore",
+    medium: "flag",
+    high: "delete",
+    severe: "timeout",
+  },
+  balanced: ACTION_BY_RISK,
+  strict: {
+    none: "ignore",
+    low: "delete",
+    medium: "timeout",
+    high: "ban",
+    severe: "ban",
+  },
 };
 
 const BAN_CONFIDENCE = 0.85;
@@ -20,8 +41,8 @@ export function decidePolicy(
   strikeCount = 0,
 ): PolicyDecision {
   const protectedTarget = settings.protectedRoles.includes(message.role);
-  let action = ACTION_BY_RISK[classification.risk];
-  let reason = classification.reason;
+  let action = ACTION_BY_LEVEL[settings.moderationLevel][classification.risk];
+  let reason = `${settings.moderationLevel} moderation level. ${classification.reason}`;
 
   if (action === "ban" && classification.confidence < BAN_CONFIDENCE) {
     action = "timeout";
@@ -57,13 +78,26 @@ export function decidePolicy(
     reason = `Automatic bans are disabled, so the policy used a timeout instead. ${reason}`;
   }
 
+  if (action === "timeout" && !settings.allowTimeouts) {
+    action = "delete";
+    reason = `Timeouts are disabled, so the policy used message deletion instead. ${reason}`;
+  }
+
+  if (action === "delete" && !settings.allowMessageDeletion) {
+    action = "flag";
+    reason = `Message deletion is disabled, so the policy only flagged the message. ${reason}`;
+  }
+
   const timeoutSeconds =
     action === "timeout"
       ? Math.min(settings.maxTimeoutSeconds, Math.max(60, 60 * 2 ** Math.min(strikeCount, 4)))
       : null;
   const held = settings.emergencyStop || settings.operatingMode !== "live" || action === "flag";
   const channelGuard =
-    !held && classification.category === "raid" && (action === "timeout" || action === "ban")
+    !held &&
+    settings.allowChatModeChanges &&
+    classification.category === "raid" &&
+    (action === "timeout" || action === "ban")
       ? "follower_only"
       : null;
 

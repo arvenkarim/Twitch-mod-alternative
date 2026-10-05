@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,19 +12,70 @@ import type {
 } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DATA_DIR, "nachtschicht.sqlite");
+const databaseContext = new AsyncLocalStorage<Database.Database>();
 
-let db: Database.Database | null = null;
+export const DEFAULT_SETTINGS: ChannelSettings = {
+  operatingMode: "shadow",
+  moderationLevel: "balanced",
+  emergencyStop: false,
+  maxTimeoutSeconds: 600,
+  allowMessageDeletion: true,
+  allowTimeouts: true,
+  allowAutomaticBans: true,
+  allowChatModeChanges: true,
+  allowTitleProposals: true,
+  houseRules:
+    "German community chat. Ban hate and harassment. Timeout raids. Delete spam. Keep light trash talk unless it targets a person.",
+  allowedTerms: ["pog", "lulw", "ratio"],
+  blockedTerms: ["onlyfans leak", "free viewers"],
+  protectedRoles: ["moderator", "broadcaster"],
+};
+
+export const DEFAULT_STREAM: StreamMetadata = {
+  title: "Late night Just Chatting",
+  category: "Just Chatting",
+  tags: ["german", "chill"],
+};
+
+let appDatabase: Database.Database | null = null;
+
+export function resolveDatabasePath(): string {
+  return process.env.NACHTSCHICHT_DB_PATH ?? path.join(DATA_DIR, "nachtschicht.sqlite");
+}
+
+export function openDatabase(filePath: string): Database.Database {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const database = new Database(filePath);
+  database.pragma("journal_mode = WAL");
+  initializeSchema(database);
+  seedIfEmpty(database);
+  return database;
+}
+
+export function runWithDatabase<T>(database: Database.Database, fn: () => T): T {
+  return databaseContext.run(database, fn);
+}
+
+export function closeDatabase(database: Database.Database): void {
+  if (appDatabase === database) {
+    appDatabase = null;
+  }
+  database.close();
+}
+
+function getAppDatabase() {
+  if (!appDatabase) {
+    appDatabase = openDatabase(resolveDatabasePath());
+  }
+  return appDatabase;
+}
 
 function getDb() {
-  if (db) {
-    return db;
-  }
+  return databaseContext.getStore() ?? getAppDatabase();
+}
 
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.exec(`
+function initializeSchema(database: Database.Database) {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       operating_mode TEXT NOT NULL,
@@ -103,9 +155,12 @@ function getDb() {
     );
   `);
 
-  ensureColumn(db, "settings", "emergency_stop", "INTEGER NOT NULL DEFAULT 0");
-  seedIfEmpty(db);
-  return db;
+  ensureColumn(database, "settings", "emergency_stop", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(database, "settings", "moderation_level", "TEXT NOT NULL DEFAULT 'balanced'");
+  ensureColumn(database, "settings", "allow_message_deletion", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(database, "settings", "allow_timeouts", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(database, "settings", "allow_chat_mode_changes", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(database, "settings", "allow_title_proposals", "INTEGER NOT NULL DEFAULT 1");
 }
 
 function ensureColumn(database: Database.Database, table: string, column: string, definition: string) {
@@ -118,29 +173,90 @@ function ensureColumn(database: Database.Database, table: string, column: string
 function seedIfEmpty(database: Database.Database) {
   const settingsCount = database.prepare("SELECT COUNT(*) as count FROM settings").get() as { count: number };
   if (settingsCount.count === 0) {
-    database
-      .prepare(
-        `INSERT INTO settings (
-          id, operating_mode, max_timeout_seconds, allow_automatic_bans, house_rules, allowed_terms, blocked_terms, protected_roles
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        "shadow",
-        600,
-        1,
-        "German community chat. Ban hate and harassment. Timeout raids. Delete spam. Keep light trash talk unless it targets a person.",
-        JSON.stringify(["pog", "lulw", "ratio"]),
-        JSON.stringify(["onlyfans leak", "free viewers"]),
-        JSON.stringify(["moderator", "broadcaster"]),
-      );
+    writeSettings(database, DEFAULT_SETTINGS);
   }
 
   const streamCount = database.prepare("SELECT COUNT(*) as count FROM stream_state").get() as { count: number };
   if (streamCount.count === 0) {
-    database
-      .prepare("INSERT INTO stream_state (id, title, category, tags) VALUES (1, ?, ?, ?)")
-      .run("Late night Just Chatting", "Just Chatting", JSON.stringify(["german", "chill"]));
+    writeStream(database, DEFAULT_STREAM);
   }
+}
+
+function writeSettings(database: Database.Database, settings: ChannelSettings) {
+  database
+    .prepare(
+      `INSERT INTO settings (
+        id, operating_mode, moderation_level, emergency_stop, max_timeout_seconds,
+        allow_message_deletion, allow_timeouts, allow_automatic_bans,
+        allow_chat_mode_changes, allow_title_proposals,
+        house_rules, allowed_terms, blocked_terms, protected_roles
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        operating_mode = excluded.operating_mode,
+        moderation_level = excluded.moderation_level,
+        emergency_stop = excluded.emergency_stop,
+        max_timeout_seconds = excluded.max_timeout_seconds,
+        allow_message_deletion = excluded.allow_message_deletion,
+        allow_timeouts = excluded.allow_timeouts,
+        allow_automatic_bans = excluded.allow_automatic_bans,
+        allow_chat_mode_changes = excluded.allow_chat_mode_changes,
+        allow_title_proposals = excluded.allow_title_proposals,
+        house_rules = excluded.house_rules,
+        allowed_terms = excluded.allowed_terms,
+        blocked_terms = excluded.blocked_terms,
+        protected_roles = excluded.protected_roles`,
+    )
+    .run(
+      settings.operatingMode,
+      settings.moderationLevel,
+      settings.emergencyStop ? 1 : 0,
+      settings.maxTimeoutSeconds,
+      settings.allowMessageDeletion ? 1 : 0,
+      settings.allowTimeouts ? 1 : 0,
+      settings.allowAutomaticBans ? 1 : 0,
+      settings.allowChatModeChanges ? 1 : 0,
+      settings.allowTitleProposals ? 1 : 0,
+      settings.houseRules,
+      JSON.stringify(settings.allowedTerms),
+      JSON.stringify(settings.blockedTerms),
+      JSON.stringify(settings.protectedRoles),
+    );
+}
+
+function writeStream(database: Database.Database, stream: StreamMetadata) {
+  database
+    .prepare(
+      `INSERT INTO stream_state (id, title, category, tags) VALUES (1, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET title = excluded.title, category = excluded.category, tags = excluded.tags`,
+    )
+    .run(stream.title, stream.category, JSON.stringify(stream.tags));
+}
+
+export function resetIsolatedModerationState(): void {
+  const database = databaseContext.getStore();
+  if (!database) {
+    throw new Error("Isolated reset requires an explicit database context.");
+  }
+
+  const files = database.prepare("PRAGMA database_list").all() as Array<{ file: string }>;
+  const file = files.find((entry) => entry.file)?.file ?? "";
+  if (!file || path.resolve(file) === path.resolve(resolveDatabasePath())) {
+    throw new Error("Refusing to reset the application database.");
+  }
+
+  const reset = database.transaction(() => {
+    writeSettings(database, DEFAULT_SETTINGS);
+    writeStream(database, DEFAULT_STREAM);
+    database.exec(`
+      DELETE FROM chat_messages;
+      DELETE FROM audit_log;
+      DELETE FROM title_proposals;
+      DELETE FROM oauth_states;
+      DELETE FROM eventsub_events;
+      DELETE FROM twitch_account;
+    `);
+  });
+  reset();
 }
 
 function parseJson<T>(value: string): T {
@@ -151,13 +267,19 @@ export function getSettings(): ChannelSettings {
   const row = getDb()
     .prepare(
       `SELECT operating_mode, emergency_stop, max_timeout_seconds, allow_automatic_bans, house_rules, allowed_terms, blocked_terms, protected_roles
+              , moderation_level, allow_message_deletion, allow_timeouts, allow_chat_mode_changes, allow_title_proposals
        FROM settings WHERE id = 1`,
     )
     .get() as {
     operating_mode: ChannelSettings["operatingMode"];
+    moderation_level: ChannelSettings["moderationLevel"];
     emergency_stop: number;
     max_timeout_seconds: number;
+    allow_message_deletion: number;
+    allow_timeouts: number;
     allow_automatic_bans: number;
+    allow_chat_mode_changes: number;
+    allow_title_proposals: number;
     house_rules: string;
     allowed_terms: string;
     blocked_terms: string;
@@ -166,9 +288,14 @@ export function getSettings(): ChannelSettings {
 
   return {
     operatingMode: row.operating_mode,
+    moderationLevel: row.moderation_level,
     emergencyStop: Boolean(row.emergency_stop),
     maxTimeoutSeconds: row.max_timeout_seconds,
+    allowMessageDeletion: Boolean(row.allow_message_deletion),
+    allowTimeouts: Boolean(row.allow_timeouts),
     allowAutomaticBans: Boolean(row.allow_automatic_bans),
+    allowChatModeChanges: Boolean(row.allow_chat_mode_changes),
+    allowTitleProposals: Boolean(row.allow_title_proposals),
     houseRules: row.house_rules,
     allowedTerms: parseJson<string[]>(row.allowed_terms),
     blockedTerms: parseJson<string[]>(row.blocked_terms),
@@ -183,9 +310,14 @@ export function updateSettings(settings: Partial<ChannelSettings>): ChannelSetti
     .prepare(
       `UPDATE settings SET
         operating_mode = ?,
+        moderation_level = ?,
         emergency_stop = ?,
         max_timeout_seconds = ?,
+        allow_message_deletion = ?,
+        allow_timeouts = ?,
         allow_automatic_bans = ?,
+        allow_chat_mode_changes = ?,
+        allow_title_proposals = ?,
         house_rules = ?,
         allowed_terms = ?,
         blocked_terms = ?,
@@ -194,9 +326,14 @@ export function updateSettings(settings: Partial<ChannelSettings>): ChannelSetti
     )
     .run(
       next.operatingMode,
+      next.moderationLevel,
       next.emergencyStop ? 1 : 0,
       next.maxTimeoutSeconds,
+      next.allowMessageDeletion ? 1 : 0,
+      next.allowTimeouts ? 1 : 0,
       next.allowAutomaticBans ? 1 : 0,
+      next.allowChatModeChanges ? 1 : 0,
+      next.allowTitleProposals ? 1 : 0,
       next.houseRules,
       JSON.stringify(next.allowedTerms),
       JSON.stringify(next.blockedTerms),

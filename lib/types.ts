@@ -32,6 +32,9 @@ export type ChannelMode = (typeof channelModes)[number];
 export const operatingModes = ["shadow", "live"] as const;
 export type OperatingMode = (typeof operatingModes)[number];
 
+export const moderationLevels = ["relaxed", "balanced", "strict"] as const;
+export type ModerationLevel = (typeof moderationLevels)[number];
+
 export type ChatMessage = {
   id: string;
   userId: string;
@@ -61,9 +64,14 @@ export type PolicyDecision = {
 
 export type ChannelSettings = {
   operatingMode: OperatingMode;
+  moderationLevel: ModerationLevel;
   emergencyStop: boolean;
   maxTimeoutSeconds: number;
+  allowMessageDeletion: boolean;
+  allowTimeouts: boolean;
   allowAutomaticBans: boolean;
+  allowChatModeChanges: boolean;
+  allowTitleProposals: boolean;
   houseRules: string;
   allowedTerms: string[];
   blockedTerms: string[];
@@ -107,6 +115,14 @@ export type TwitchConnection = {
   eventsubStatus: string | null;
 };
 
+export type AiRuntimeStatus = {
+  engine: "heuristic" | "llm";
+  modelVersion: string;
+  contextWindowTokens: number | null;
+  tokensUsed: number;
+  tokensRemaining: number | null;
+};
+
 export type DashboardSnapshot = {
   settings: ChannelSettings;
   stream: StreamMetadata;
@@ -114,4 +130,5 @@ export type DashboardSnapshot = {
   recentMessages: ChatMessage[];
   audit: AuditRecord[];
   connection: TwitchConnection;
+  aiRuntime: AiRuntimeStatus;
 };
