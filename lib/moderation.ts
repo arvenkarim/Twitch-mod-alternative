@@ -13,6 +13,7 @@ import {
   updateSettings,
 } from "./db";
 import { decidePolicy, RULE_VERSION } from "./policy";
+import { normalizeSettingsPatch, type SettingsPatch } from "./settings-input";
 import { proposeStreamUpdate } from "./title-advisor";
 import { executeTwitchAction } from "./twitch";
 import type { ChannelSettings, ChatMessage, Classification, DashboardSnapshot, PolicyDecision } from "./types";
@@ -94,6 +95,16 @@ export function setOperatingMode(operatingMode: ChannelSettings["operatingMode"]
 
 export function setChannelSettings(settings: Partial<ChannelSettings>) {
   return updateSettings(settings);
+}
+
+export function applyChannelSettings(
+  patch: SettingsPatch,
+): { ok: true; settings: ChannelSettings } | { ok: false; error: string } {
+  const normalized = normalizeSettingsPatch(patch, getSettings());
+  if (!normalized.ok) {
+    return normalized;
+  }
+  return { ok: true, settings: updateSettings(normalized.value) };
 }
 
 export function decideTitleProposal(status: "approved" | "rejected") {

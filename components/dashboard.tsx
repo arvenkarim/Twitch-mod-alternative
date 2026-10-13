@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReplayCaseResult, ReplayReport } from "@/lib/replay";
 import type { ChannelRole, DashboardSnapshot } from "@/lib/types";
@@ -116,14 +117,14 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
   }
 
   return (
-    <div className="layout">
-      <section className="hero">
+    <div className="page">
+      <header className="page-head">
         <div>
-          <p className="chip">Nachtschicht</p>
-          <h1>AI moderator for Twitch chat</h1>
-          <p className="muted">
-            The AI acts in chat like a real moderator: delete, timeout, and ban severe violations.
-            Title, category, and tags stay proposals until you approve them.
+          <p className="kicker">Live desk</p>
+          <h1>Channel moderation</h1>
+          <p className="lede">
+            Each message gets a verdict. Policy decides whether to delete, time out, or ban. Title, category, and
+            tags stay proposals until you approve them.
           </p>
         </div>
         <div className="actions">
@@ -142,7 +143,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
               );
             }}
           >
-            {snapshot.settings.operatingMode === "live" ? "Shadow Mode" : "Live Mode"}
+            {snapshot.settings.operatingMode === "live" ? "Switch to shadow" : "Switch to live"}
           </button>
           <button
             disabled={busy}
@@ -154,6 +155,29 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             Run demo chat
           </button>
         </div>
+      </header>
+
+      <section className="stat-row" aria-label="Desk status">
+        <article className="stat">
+          <span>Mode</span>
+          <strong>{liveLabel}</strong>
+        </article>
+        <article className="stat">
+          <span>Level</span>
+          <strong>{moderationLevelLabel[snapshot.settings.moderationLevel]}</strong>
+        </article>
+        <article className="stat">
+          <span>Messages</span>
+          <strong>{stats.messages}</strong>
+        </article>
+        <article className="stat">
+          <span>Flagged</span>
+          <strong>{stats.flags}</strong>
+        </article>
+        <article className="stat">
+          <span>Executed</span>
+          <strong>{stats.actions}</strong>
+        </article>
       </section>
 
       <section className="panel">
@@ -318,21 +342,23 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             />
           </div>
           <p className="muted">
-            Title changes stay proposals even when this is on. You still confirm publication yourself.
+            Title changes stay proposals even when this is on. You still confirm publication yourself. House rules,
+            word lists, and protected roles are in <Link href="/settings">Channel settings</Link>.
           </p>
         </div>
       </section>
 
       <section className="grid">
         <div className="panel">
-          <h2>AI budget and context</h2>
+          <h2>Scoring</h2>
           <div className="actions">
             <span className="chip">{snapshot.aiRuntime.modelVersion}</span>
-            <span className="chip ok">0 tokens used</span>
+            <span className="chip ok">Local verdict</span>
           </div>
           <p className="muted">
-            Nachtschicht currently uses a local heuristic, not an LLM. There is no token limit and no context
-            window yet. Once an LLM is enabled, used tokens, remaining budget, and context usage will show here.
+            Scoring stays inside the app and returns a category, risk, and confidence. It has no Twitch tools, so
+            it cannot skip policy, shadow mode, or the audit log. Token use appears here only after a language
+            model is connected the same way.
           </p>
         </div>
 
@@ -402,7 +428,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             <span className="chip danger">Executed {stats.actions}</span>
           </div>
           {pending ? (
-            <div className="card" style={{ marginTop: 16 }}>
+            <div className="card proposal">
               <div className="meta">
                 <strong>Title proposal</strong>
                 <span className="chip warn">Approval required</span>
@@ -434,9 +460,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
               </div>
             </div>
           ) : (
-            <p className="muted" style={{ marginTop: 16 }}>
-              No open title proposal.
-            </p>
+            <p className="muted proposal-empty">No open title proposal.</p>
           )}
         </div>
       </section>

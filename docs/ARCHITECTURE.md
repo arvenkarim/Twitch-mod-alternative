@@ -61,8 +61,19 @@ The replay route binds `ingestChatMessage` to `data/replay.sqlite` through `runW
 | `lib/replay.ts` | Runs the corpus through ingest on an isolated SQLite file in shadow mode. Refuses to reset the application database. |
 | `lib/db.ts` | SQLite schema, migrations (`ensureColumn`), and all persistence. `runWithDatabase` binds a call to an explicit file. |
 | `app/api/replay/route.ts` | Starts one replay against `data/replay.sqlite` and returns the report. |
+| `lib/settings-input.ts` | Normalizes channel-setting edits: term lists, house rules, timeout bounds, and locked protected roles. |
 | `app/api/*` | Thin route handlers: validate with zod, call `lib/*`, return JSON. |
-| `components/dashboard.tsx` | Single client dashboard: moderation level and permissions, AI runtime status, timeout details, test chat, replay bench, stream shield, proposals, audit. |
+| `app/layout.tsx`, `components/app-nav.tsx` | App shell: sidebar, type, and the desk / channel-settings navigation. |
+| `components/dashboard.tsx` | Live desk: moderation shortcuts, AI runtime status, timeout details, test chat, replay bench, stream shield, proposals, audit. |
+| `app/settings/page.tsx`, `components/settings-form.tsx` | Streamer channel setup: shadow or live, emergency stop, moderation level, permission ceiling, house rules, word lists, and protected roles. |
+
+## Classifier boundary
+
+The classifier returns a structured verdict. It does not call Twitch, and it does not receive tools.
+
+MCP is a protocol for exposing tools to a model. Wiring moderation through an MCP server would give the model delete, timeout, ban, and chat-settings tools. The model could then skip `lib/policy.ts`: confidence thresholds, the permission ceiling, protected roles, shadow mode, the emergency stop, and the audit record. Those checks have to stay deterministic code.
+
+A future LLM still returns `Classification` only, through a normal model API with a separated prompt. MCP is the wrong interface for that step. A later read-only MCP server could expose audit or proposal status to an operator assistant. It must not be the path that punishes chat.
 
 ## Policy summary
 
@@ -82,7 +93,8 @@ the emergency stop always hold actions.
 Timeout duration grows with strikes (60 seconds doubling, capped by
 `maxTimeoutSeconds`). A raid can request follower-only mode only when
 `allowChatModeChanges` is enabled. Title proposals can be disabled independently
-and still always require broadcaster approval before publication.
+and still always require broadcaster approval before publication. The settings
+API keeps `broadcaster` and `moderator` in `protectedRoles`.
 
 ## Persistence
 
@@ -103,6 +115,8 @@ Environment: see `.env.example` (`TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TW
 Done:
 - Heuristic classifier v2, policy engine v3, audit log, shadow mode, title proposals with approval, English dashboard, demo scenarios.
 - Streamer controls for relaxed/balanced/strict moderation and individual delete, timeout, ban, chat-guard, and title-proposal permissions.
+- Channel settings page for house rules, allowed and blocked terms, and protected roles. Broadcaster and moderator stay protected even if a request omits them.
+- App shell with a persistent sidebar for the desk and channel settings.
 - Dashboard AI runtime status and detailed timeout history. The heuristic uses no tokens; LLM context and token budget remain unavailable until an LLM provider is wired.
 - Replay bench: labeled corpus, isolated `data/replay.sqlite`, shadow mode, dashboard panel, `npm run replay`.
 - `getDashboard` returns `connection`.
