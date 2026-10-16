@@ -9,6 +9,7 @@ import {
   type SettingsPatch,
 } from "@/lib/settings-input";
 import type { ChannelRole, ChannelSettings, ModerationLevel } from "@/lib/types";
+import { AnimatePresence, PopIn, Pressable, PulseDot, Switch } from "@/components/motion";
 
 const levels: Array<{ id: ModerationLevel; title: string; summary: string }> = [
   {
@@ -204,7 +205,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
           <h2>Safety</h2>
           <p className="muted">These switch immediately. The rest of this page saves together.</p>
           <div className="choice-grid two">
-            <button
+            <Pressable
               type="button"
               className={`choice-card ${saved.operatingMode === "shadow" ? "selected" : ""}`}
               disabled={busy}
@@ -220,8 +221,8 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
             >
               <strong>Shadow</strong>
               <span>Score chat and keep the audit. Nothing is deleted, timed out, or banned.</span>
-            </button>
-            <button
+            </Pressable>
+            <Pressable
               type="button"
               className={`choice-card ${saved.operatingMode === "live" ? "selected" : ""}`}
               disabled={busy}
@@ -237,18 +238,21 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
             >
               <strong>Live</strong>
               <span>Carry out deletes, timeouts, bans, and raid protection when they are allowed below.</span>
-            </button>
+            </Pressable>
           </div>
           <div className={`emergency-card ${saved.emergencyStop ? "active" : ""}`}>
             <div>
-              <strong>Emergency stop</strong>
+              <strong className="status-title">
+                <PulseDot tone={saved.emergencyStop ? "danger" : "ok"} active={saved.emergencyStop} />
+                Emergency stop
+              </strong>
               <div className="muted">
                 {saved.emergencyStop
                   ? "On: every action is held and only logged."
                   : "Off: permitted actions may execute in live mode."}
               </div>
             </div>
-            <button
+            <Pressable
               type="button"
               className={saved.emergencyStop ? "secondary" : "danger"}
               disabled={busy}
@@ -260,7 +264,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
               }
             >
               {saved.emergencyStop ? "Release stop" : "Activate stop"}
-            </button>
+            </Pressable>
           </div>
         </section>
 
@@ -269,7 +273,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
           <p className="muted">The level picks the action. Permissions below can only make it softer.</p>
           <div className="choice-grid">
             {levels.map((level) => (
-              <button
+              <Pressable
                 key={level.id}
                 type="button"
                 className={`choice-card ${draft.moderationLevel === level.id ? "selected" : ""}`}
@@ -278,7 +282,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
               >
                 <strong>{level.title}</strong>
                 <span>{level.summary}</span>
-              </button>
+              </Pressable>
             ))}
           </div>
         </section>
@@ -288,13 +292,10 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
           <div className="permission-list">
             {permissions.map((permission) => (
               <label className="permission-toggle" key={permission.key}>
-                <input
-                  type="checkbox"
+                <Switch
                   checked={draft[permission.key]}
                   disabled={busy}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, [permission.key]: event.target.checked }))
-                  }
+                  onChange={(checked) => setDraft((current) => ({ ...current, [permission.key]: checked }))}
                 />
                 <span className="permission-copy">
                   <strong>{permission.label}</strong>
@@ -384,17 +385,16 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
               const checked = locked || draft.protectedRoles.includes(role);
               return (
                 <label className="permission-toggle" key={role}>
-                  <input
-                    type="checkbox"
+                  <Switch
                     checked={checked}
                     disabled={busy || locked}
-                    onChange={(event) => {
+                    onChange={(next) => {
                       if (locked) {
                         return;
                       }
                       setDraft((current) => ({
                         ...current,
-                        protectedRoles: event.target.checked
+                        protectedRoles: next
                           ? [...current.protectedRoles, role]
                           : current.protectedRoles.filter((entry) => entry !== role),
                       }));
@@ -416,6 +416,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
         <p className={noticeTone === "error" ? "notice error" : "notice muted"}>{notice}</p>
         <div className="actions">
           <span className={`chip ${saved.operatingMode === "live" ? "danger" : "warn"}`}>
+            <PulseDot tone={saved.operatingMode === "live" ? "danger" : "warn"} active={saved.operatingMode === "live"} />
             {saved.operatingMode === "live" ? "Live" : "Shadow"}
           </span>
           {saved.emergencyStop ? <span className="chip danger">Emergency stop</span> : null}
@@ -455,9 +456,9 @@ export function SettingsForm({ initialSettings }: { initialSettings: ChannelSett
           </li>
         </ul>
         {formError ? <p className="notice error">{formError}</p> : null}
-        <button type="submit" disabled={busy || !dirty || !normalized.ok}>
+        <Pressable type="submit" disabled={busy || !dirty || !normalized.ok}>
           {dirty ? "Save channel settings" : "Channel settings saved"}
-        </button>
+        </Pressable>
       </aside>
     </form>
   );
@@ -501,23 +502,25 @@ function TermEditor({
             }
           }}
         />
-        <button type="button" className="secondary" disabled={disabled || value.trim() === ""} onClick={onAdd}>
+        <Pressable type="button" className="secondary" disabled={disabled || value.trim() === ""} onClick={onAdd}>
           Add
-        </button>
+        </Pressable>
       </div>
       <p className="muted">{hint}</p>
       {terms.length === 0 ? (
         <p className="muted">No terms yet.</p>
       ) : (
         <div className="term-list">
-          {terms.map((term) => (
-            <span className="term-chip" key={term}>
-              {term}
-              <button type="button" disabled={disabled} onClick={() => onRemove(term)} aria-label={`Remove ${term}`}>
-                ×
-              </button>
-            </span>
-          ))}
+          <AnimatePresence initial={false}>
+            {terms.map((term) => (
+              <PopIn className="term-chip" key={term}>
+                {term}
+                <Pressable type="button" disabled={disabled} onClick={() => onRemove(term)} aria-label={`Remove ${term}`}>
+                  ×
+                </Pressable>
+              </PopIn>
+            ))}
+          </AnimatePresence>
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { AppNav } from "@/components/app-nav";
+import { MotionProvider } from "@/components/motion";
 import "./globals.css";
 
 const sans = IBM_Plex_Sans({
@@ -24,10 +25,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
-        <div className="shell">
-          <AppNav />
-          <div className="workspace">{children}</div>
-        </div>
+        <MotionProvider>
+          <div className="shell">
+            <AppNav />
+            <div className="workspace">{children}</div>
+          </div>
+        </MotionProvider>
       </body>
     </html>
   );

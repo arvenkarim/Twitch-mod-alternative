@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "@/components/motion";
 
 const links = [
   { href: "/", id: "desk", label: "Desk", hint: "Live decisions" },
@@ -31,6 +32,7 @@ export function AppNav() {
             className={current === link.id ? "active" : undefined}
             aria-current={current === link.id ? "page" : undefined}
           >
+            {current === link.id ? <motion.span layoutId="nav-active" className="nav-indicator" /> : null}
             <span>{link.label}</span>
             <small>{link.hint}</small>
           </Link>

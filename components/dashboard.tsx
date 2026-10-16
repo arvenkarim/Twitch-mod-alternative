@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReplayCaseResult, ReplayReport } from "@/lib/replay";
 import type { ChannelRole, DashboardSnapshot } from "@/lib/types";
+import { AnimatedValue, Pressable, PulseDot, Switch } from "@/components/motion";
 
 const groupLabel: Record<ReplayCaseResult["group"], string> = {
   slang: "Slang",
@@ -128,8 +129,14 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
           </p>
         </div>
         <div className="actions">
-          <span className={`chip ${snapshot.settings.operatingMode === "live" ? "danger" : "warn"}`}>{liveLabel}</span>
-          <button
+          <span className={`chip ${snapshot.settings.operatingMode === "live" ? "danger" : "warn"}`}>
+            <PulseDot
+              tone={snapshot.settings.operatingMode === "live" ? "danger" : "warn"}
+              active={snapshot.settings.operatingMode === "live"}
+            />
+            {liveLabel}
+          </span>
+          <Pressable
             className="secondary"
             disabled={busy}
             onClick={async () => {
@@ -144,8 +151,8 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             }}
           >
             {snapshot.settings.operatingMode === "live" ? "Switch to shadow" : "Switch to live"}
-          </button>
-          <button
+          </Pressable>
+          <Pressable
             disabled={busy}
             onClick={async () => {
               await run("/api/demo");
@@ -153,39 +160,49 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
             }}
           >
             Run demo chat
-          </button>
+          </Pressable>
         </div>
       </header>
 
       <section className="stat-row" aria-label="Desk status">
         <article className="stat">
           <span>Mode</span>
-          <strong>{liveLabel}</strong>
+          <strong>
+            <AnimatedValue value={liveLabel} />
+          </strong>
         </article>
         <article className="stat">
           <span>Level</span>
-          <strong>{moderationLevelLabel[snapshot.settings.moderationLevel]}</strong>
+          <strong>
+            <AnimatedValue value={moderationLevelLabel[snapshot.settings.moderationLevel]} />
+          </strong>
         </article>
         <article className="stat">
           <span>Messages</span>
-          <strong>{stats.messages}</strong>
+          <strong>
+            <AnimatedValue value={stats.messages} />
+          </strong>
         </article>
         <article className="stat">
           <span>Flagged</span>
-          <strong>{stats.flags}</strong>
+          <strong>
+            <AnimatedValue value={stats.flags} />
+          </strong>
         </article>
         <article className="stat">
           <span>Executed</span>
-          <strong>{stats.actions}</strong>
+          <strong>
+            <AnimatedValue value={stats.actions} />
+          </strong>
         </article>
       </section>
 
       <section className="panel">
         <div className="meta">
           <h2>Replay bench</h2>
-          <button type="button" disabled={busy} onClick={() => void playReplay()}>
+          <Pressable type="button" disabled={busy} onClick={() => void playReplay()}>
             Run corpus
-          </button>
+          </Pressable>
         </div>
         <p className="muted">
           The corpus runs in its own database in shadow mode. Every decision is logged.
@@ -291,14 +308,17 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
           <h2>What the bot may do</h2>
           <div className={`emergency-card ${snapshot.settings.emergencyStop ? "active" : ""}`}>
             <div>
-              <strong>Emergency stop</strong>
+              <strong className="status-title">
+                <PulseDot tone={snapshot.settings.emergencyStop ? "danger" : "ok"} active={snapshot.settings.emergencyStop} />
+                Emergency stop
+              </strong>
               <div className="muted">
                 {snapshot.settings.emergencyStop
                   ? "On: every action is held and only logged."
                   : "Off: permitted actions may execute in live mode."}
               </div>
             </div>
-            <button
+            <Pressable
               type="button"
               className={snapshot.settings.emergencyStop ? "secondary" : "danger"}
               disabled={busy}
@@ -307,7 +327,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
               }
             >
               {snapshot.settings.emergencyStop ? "Release stop" : "Activate stop"}
-            </button>
+            </Pressable>
           </div>
           <div className="permission-list">
             <PermissionToggle
@@ -408,9 +428,9 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
               <option value="broadcaster">Broadcaster</option>
             </select>
             <textarea value={text} onChange={(event) => setText(event.target.value)} rows={4} />
-            <button disabled={busy} type="submit">
+            <Pressable disabled={busy} type="submit">
               Score message
-            </button>
+            </Pressable>
           </form>
         </div>
 
@@ -438,7 +458,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
               </p>
               <p className="muted">{pending.reason}</p>
               <div className="actions">
-                <button
+                <Pressable
                   disabled={busy}
                   onClick={async () => {
                     await run("/api/title", { status: "approved" });
@@ -446,8 +466,8 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
                   }}
                 >
                   Approve
-                </button>
-                <button
+                </Pressable>
+                <Pressable
                   className="secondary"
                   disabled={busy}
                   onClick={async () => {
@@ -456,7 +476,7 @@ export function Dashboard({ initialSnapshot }: { initialSnapshot: DashboardSnaps
                   }}
                 >
                   Reject
-                </button>
+                </Pressable>
               </div>
             </div>
           ) : (
@@ -555,12 +575,7 @@ function PermissionToggle({
 }) {
   return (
     <label className="permission-toggle">
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
+      <Switch checked={checked} disabled={disabled} onChange={onChange} />
       <span>{label}</span>
     </label>
   );

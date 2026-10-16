@@ -9,3 +9,4 @@ coverage
 data/*.sqlite
 data/*.sqlite-*
 .DS_Store
+tsconfig.tsbuildinfo

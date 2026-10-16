@@ -31,6 +31,6 @@ Read `docs/ARCHITECTURE.md` before structural changes and update it (module map,
 - Without credentials the app must stay in demo mode and never call Twitch.
 
 ## Conventions
-- Code, comments, logs, commit messages, and internal docs: English. User-facing dashboard text: English.
+- Code, comments, logs, commit messages, and docs (`docs/`, `README.md`, this rule): English. User-facing dashboard text: English.
 - Keep route handlers thin; logic lives in `lib/`.
 - Verify UI changes in the browser (`npm run dev`, http://localhost:3000).

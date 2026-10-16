@@ -1,6 +1,6 @@
 # Nachtschicht Architecture
 
-Nachtschicht is a Twitch AI moderator. In chat it acts like a real moderator (warn, delete, timeout, ban, chat modes). Stream title, category, and tags are only **proposed** by the AI and published after broadcaster approval.
+Nachtschicht is a Twitch AI moderator whose product goal is to replace the staffed chat-moderation shift. It watches chat and acts like a real moderator (warn, delete, timeout, ban, chat modes), so a channel does not need humans continuously reading messages. Human authority remains for appeals, unbans, emergency control, and stream decisions. Stream title, category, and tags are only **proposed** by the AI and published after broadcaster approval.
 
 ## Product invariants
 
@@ -19,6 +19,7 @@ These rules define the product. Any change that breaks one is a bug, not a featu
 - Next.js 15 (App Router) with React 19, single app, Node.js runtime for all API routes.
 - SQLite via `better-sqlite3`, file `data/nachtschicht.sqlite` (git-ignored).
 - `zod` for request validation, `vitest` for tests.
+- `motion` for UI micro-interactions, `@modelcontextprotocol/sdk` for the read-only MCP endpoint.
 
 ## Data flow
 
@@ -63,9 +64,15 @@ The replay route binds `ingestChatMessage` to `data/replay.sqlite` through `runW
 | `app/api/replay/route.ts` | Starts one replay against `data/replay.sqlite` and returns the report. |
 | `lib/settings-input.ts` | Normalizes channel-setting edits: term lists, house rules, timeout bounds, and locked protected roles. |
 | `app/api/*` | Thin route handlers: validate with zod, call `lib/*`, return JSON. |
-| `app/layout.tsx`, `components/app-nav.tsx` | App shell: sidebar, type, and the desk / channel-settings navigation. |
+| `lib/mcp.ts` | Read-only MCP server (status, audit, recent chat, pending proposal), bearer-token and origin checks, stateless Streamable HTTP handler. |
+| `app/api/mcp/route.ts` | Thin MCP endpoint: disabled without `MCP_API_TOKEN`, rejects foreign origins and wrong tokens, then delegates to `handleMcpRequest`. |
+| `app/layout.tsx`, `components/app-nav.tsx` | App shell: sidebar, type, and the desk / channel-settings navigation with an animated active marker. |
+| `components/motion.tsx` | Micro-interactions on `motion/react`: `MotionProvider` (honors reduced motion), `Pressable`, `Switch`, `PulseDot`, `AnimatedValue`, `PopIn`. |
 | `components/dashboard.tsx` | Live desk: moderation shortcuts, AI runtime status, timeout details, test chat, replay bench, stream shield, proposals, audit. |
 | `app/settings/page.tsx`, `components/settings-form.tsx` | Streamer channel setup: shadow or live, emergency stop, moderation level, permission ceiling, house rules, word lists, and protected roles. |
+| `docs/OVERVIEW.md` | Shareable introduction for streamers and collaborators. The build plan stays in this file. |
+| `docs/DOCUMENTATION.md` | How to run, use, and check the desk. |
+| `docs/MARKETING.md` | Who we sell to, price, and the shadow-to-paid sales path. |
 
 ## Classifier boundary
 
@@ -73,7 +80,16 @@ The classifier returns a structured verdict. It does not call Twitch, and it doe
 
 MCP is a protocol for exposing tools to a model. Wiring moderation through an MCP server would give the model delete, timeout, ban, and chat-settings tools. The model could then skip `lib/policy.ts`: confidence thresholds, the permission ceiling, protected roles, shadow mode, the emergency stop, and the audit record. Those checks have to stay deterministic code.
 
-A future LLM still returns `Classification` only, through a normal model API with a separated prompt. MCP is the wrong interface for that step. A later read-only MCP server could expose audit or proposal status to an operator assistant. It must not be the path that punishes chat.
+A future LLM still returns `Classification` only, through a normal model API with a separated prompt. MCP is the wrong interface for that step.
+
+## MCP server (read-only)
+
+`/api/mcp` serves an operator assistant, not the moderation path. Tools: `get_channel_status`, `get_pending_proposal`, `list_audit`, `list_recent_messages`. All are annotated `readOnlyHint` and only call read functions from `lib/db.ts` / `getDashboard`. Rules:
+
+- No tool may delete, time out, ban, unban, change settings, approve proposals, or touch Twitch. Adding a write tool is an architecture change, not a feature.
+- Disabled unless `MCP_API_TOKEN` (32+ characters) is set. Requests need `Authorization: Bearer <token>` (constant-time compare). A present `Origin` header must match the host (DNS rebinding guard).
+- Stateless Streamable HTTP with JSON responses: a new server and transport per POST. `GET`/`DELETE` return 405.
+- Chat text in results is marked `untrustedFields: ["text"]`, and the server instructions tell the client not to follow it. OAuth tokens are never returned.
 
 ## Policy summary
 
@@ -108,7 +124,27 @@ Schema changes go through `CREATE TABLE IF NOT EXISTS` plus `ensureColumn` so ex
 
 Scopes requested (see `getTwitchConfig`): `user:read:chat`, `user:write:chat`, `moderator:manage:chat_messages`, `moderator:manage:banned_users`, `moderator:manage:chat_settings`, `channel:manage:broadcast`.
 
-Environment: see `.env.example` (`TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_REDIRECT_URI`, `TWITCH_BOT_USER_ID`, planned `TOKEN_ENCRYPTION_KEY`, `EVENTSUB_SECRET`). Without credentials the app runs in demo mode and never contacts Twitch.
+Environment: see `.env.example` (`TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_REDIRECT_URI`, `TWITCH_BOT_USER_ID`, optional `MCP_API_TOKEN`, planned `TOKEN_ENCRYPTION_KEY`, `EVENTSUB_SECRET`). Without credentials the app runs in demo mode and never contacts Twitch.
+
+## Product constraints
+
+These decisions are closed. They are not open design questions.
+
+- Chat actions are autonomous: flag, delete, timeout, permanent ban, and chat modes (clear, slow, follower-only, subscriber-only, emote-only) when the streamer's permission ceiling allows them.
+- Permanent bans do not wait for a second approval. Approval stays on title, category, and tags.
+- Chat text is never used to train a model.
+- Sell to streamers first. A Twitch partnership conversation waits until usage and safety numbers exist. The sales path is in `docs/MARKETING.md`.
+- The service runs on one rented EU server we operate. It does not run as an app on the streamer's PC. Channels share that server. A server per channel is not the cost model. The current database is still one channel per process.
+- Before a public launch, review GDPR, a data-processing agreement, and the Twitch Developer Agreement.
+- Rollout order for a channel: replay, then shadow, then delete and timeout, then bans. Title proposals stay proposals through every stage.
+
+## Quality bar before a channel goes live
+
+- Measure false-positive rate, precision, action latency, and appeal rate per channel.
+- Emergency stop and permission revocation take effect on the next decision.
+- Fail open: an outage must not punish chat in bulk.
+- A rate limit and a circuit breaker sit in front of the Twitch API.
+- No secrets in code, logs, or git.
 
 ## Implementation status
 
@@ -117,18 +153,24 @@ Done:
 - Streamer controls for relaxed/balanced/strict moderation and individual delete, timeout, ban, chat-guard, and title-proposal permissions.
 - Channel settings page for house rules, allowed and blocked terms, and protected roles. Broadcaster and moderator stay protected even if a request omits them.
 - App shell with a persistent sidebar for the desk and channel settings.
-- Dashboard AI runtime status and detailed timeout history. The heuristic uses no tokens; LLM context and token budget remain unavailable until an LLM provider is wired.
+- Dashboard AI runtime status, detailed timeout history, and emergency stop. The heuristic uses no tokens; LLM context and token budget remain unavailable until an LLM provider is wired.
 - Replay bench: labeled corpus, isolated `data/replay.sqlite`, shadow mode, dashboard panel, `npm run replay`.
 - `getDashboard` returns `connection`.
-- Helpers for commands, badges, EventSub signatures, token encryption, and the database tables for OAuth/EventSub.
+- Read-only MCP endpoint `/api/mcp` with bearer token, origin guard, and tests (`lib/mcp.test.ts`).
+- UI micro-interactions: pressable buttons, animated switches, pulsing live/emergency indicators, animated stat values, sliding nav marker, term chip pop-in. Respects `prefers-reduced-motion`.
+- ESLint runs `eslint-config-next` through `FlatCompat`.
+- Helpers for commands, badges, EventSub signatures, token encryption, and the database tables for OAuth/EventSub. `parseBroadcasterCommand` covers `stop`, `start`, `shadow`, `live`, `approve`, `reject`, and `unban <login>`.
 
-In progress / not wired yet:
-- OAuth callback (token exchange, `consumeOauthState`, `saveTwitchAccount`).
-- Real Helix calls in `executeTwitchAction` (ban, delete, chat settings, modify channel information) with token refresh.
-- `/api/twitch/eventsub` route using `verifyEventSubSignature`, `rememberEvent`, `roleFromBadges`.
-- Broadcaster commands and strike counts wired into `ingestChatMessage`.
-- Dashboard emergency stop and unban UI.
+## Remaining plan
 
-Planned:
-- LLM classifier for uncertain cases with strict prompt separation.
-- Data retention job and export/delete for GDPR.
+Work in this order. Each step stays inside the invariants above. Without Twitch credentials the app stays in demo mode and never calls Twitch.
+
+1. **OAuth callback.** Exchange the code, consume `oauth_state` once, encrypt tokens with `lib/crypto.ts`, and store them with `saveTwitchAccount`. The current `/api/twitch/callback` route only reserves the URL.
+2. **Helix executor.** Replace the demo adapter in `executeTwitchAction` with delete, timeout, ban, chat-mode changes, and channel updates. Refresh the access token before it expires. Put the rate limit and circuit breaker here.
+3. **EventSub.** Add `/api/twitch/eventsub`. Verify the signature and timestamp, deduplicate with `rememberEvent`, answer the verification challenge, map badges with `roleFromBadges`, then call `ingestChatMessage`.
+4. **Broadcaster commands and strikes.** From a verified broadcaster only, run the parsed `!aimod` command inside `ingestChatMessage`. Count strikes so timeout duration can double from 60 seconds up to `maxTimeoutSeconds`.
+5. **Unban UI.** Add a human-only unban control on the desk. The classifier must not emit unban.
+6. **LLM classifier.** Use it only for uncertain cases. It returns `Classification` through a normal model API. The prompt is separated from chat text. It gets no tools.
+7. **Retention.** Add a retention job plus export and delete for stored chat and audit rows.
+
+This document is the plan. Do not add a second planning vault.
